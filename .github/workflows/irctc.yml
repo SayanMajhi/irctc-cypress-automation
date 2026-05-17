@@ -31,24 +31,24 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      # ---------------------------------
+      # -----------------------------------
       # Checkout Repository
-      # ---------------------------------
+      # -----------------------------------
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # ---------------------------------
+      # -----------------------------------
       # Setup Python
-      # ---------------------------------
+      # -----------------------------------
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
 
-      # ---------------------------------
+      # -----------------------------------
       # Install Python Dependencies
-      # ---------------------------------
+      # -----------------------------------
       - name: Install Python Dependencies
         run: |
           sudo timedatectl set-timezone Asia/Kolkata
@@ -57,38 +57,38 @@ jobs:
 
           pip install -r irctc-captcha-solver/requirements.txt
 
-      # ---------------------------------
+      # -----------------------------------
       # Setup Node.js
-      # ---------------------------------
+      # -----------------------------------
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      # ---------------------------------
+      # -----------------------------------
       # Install Node Dependencies
-      # ---------------------------------
+      # -----------------------------------
       - name: Install Node Dependencies
         run: |
           npm install
           npm install -g wait-on
 
-      # ---------------------------------
-      # Start Flask Captcha Server
-      # ---------------------------------
-      - name: Start Captcha Solver Server
+      # -----------------------------------
+      # Start Flask OCR Server
+      # -----------------------------------
+      - name: Start OCR Server
         run: |
           python3 irctc-captcha-solver/app-server.py --host 0.0.0.0 --port 5000 &
 
-          echo "Waiting for Flask server..."
+          echo "Waiting for OCR server..."
 
           npx wait-on http://127.0.0.1:5000
 
-          echo "Flask server started successfully."
+          echo "OCR server started successfully."
 
-      # ---------------------------------
-      # Prepare Environment Variables
-      # ---------------------------------
+      # -----------------------------------
+      # Prepare Secrets / ENV
+      # -----------------------------------
       - name: Prepare Environment Variables
         run: |
           PASSWORD="${{ inputs.PASSWORD || secrets.PASSWORD }}"
@@ -103,20 +103,18 @@ jobs:
           echo "USERNAME=$USERNAME" >> $GITHUB_ENV
           echo "UPI_ID=$UPI_ID" >> $GITHUB_ENV
 
-      # ---------------------------------
+      # -----------------------------------
       # Run Cypress Automation
-      # ---------------------------------
-      - name: Run IRCTC Cypress Automation
+      # -----------------------------------
+      - name: Run Cypress Automation
         run: |
           xvfb-run npx cypress run \
             --browser chrome \
-            --record \
-            --key ${{ secrets.CYPRESS_RECORD_KEY }} \
             --env UPI_ID=${{ env.UPI_ID }},USERNAME=${{ env.USERNAME }},PASSWORD=${{ env.PASSWORD }}
 
-      # ---------------------------------
-      # Upload Screenshots if Failed
-      # ---------------------------------
+      # -----------------------------------
+      # Upload Screenshots on Failure
+      # -----------------------------------
       - name: Upload Cypress Screenshots
         if: failure()
         uses: actions/upload-artifact@v4
@@ -124,9 +122,9 @@ jobs:
           name: cypress-screenshots
           path: cypress/screenshots
 
-      # ---------------------------------
+      # -----------------------------------
       # Upload Cypress Videos
-      # ---------------------------------
+      # -----------------------------------
       - name: Upload Cypress Videos
         if: always()
         uses: actions/upload-artifact@v4
