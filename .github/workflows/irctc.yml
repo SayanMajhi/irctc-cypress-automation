@@ -10,19 +10,19 @@ on:
   workflow_dispatch:
     inputs:
       USERNAME:
+        description: "IRCTC Username"
         required: true
         type: string
-        description: "IRCTC Username"
 
       PASSWORD:
+        description: "IRCTC Password"
         required: true
         type: string
-        description: "IRCTC Password"
 
       UPI_ID:
+        description: "UPI ID"
         required: true
         type: string
-        description: "UPI ID"
 
 jobs:
   IRCTC-Booking:
@@ -31,24 +31,24 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      # -----------------------------
+      # ---------------------------------
       # Checkout Repository
-      # -----------------------------
+      # ---------------------------------
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # -----------------------------
+      # ---------------------------------
       # Setup Python
-      # -----------------------------
+      # ---------------------------------
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
 
-      # -----------------------------
+      # ---------------------------------
       # Install Python Dependencies
-      # -----------------------------
+      # ---------------------------------
       - name: Install Python Dependencies
         run: |
           sudo timedatectl set-timezone Asia/Kolkata
@@ -57,38 +57,38 @@ jobs:
 
           pip install -r irctc-captcha-solver/requirements.txt
 
-      # -----------------------------
+      # ---------------------------------
       # Setup Node.js
-      # -----------------------------
+      # ---------------------------------
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      # -----------------------------
+      # ---------------------------------
       # Install Node Dependencies
-      # -----------------------------
+      # ---------------------------------
       - name: Install Node Dependencies
         run: |
           npm install
           npm install -g wait-on
 
-      # -----------------------------
-      # Start Captcha Solver Server
-      # -----------------------------
+      # ---------------------------------
+      # Start Flask Captcha Server
+      # ---------------------------------
       - name: Start Captcha Solver Server
         run: |
           python3 irctc-captcha-solver/app-server.py --host 0.0.0.0 --port 5000 &
 
-          echo "Waiting for Flask server to start..."
+          echo "Waiting for Flask server..."
 
           npx wait-on http://127.0.0.1:5000
 
           echo "Flask server started successfully."
 
-      # -----------------------------
+      # ---------------------------------
       # Prepare Environment Variables
-      # -----------------------------
+      # ---------------------------------
       - name: Prepare Environment Variables
         run: |
           PASSWORD="${{ inputs.PASSWORD || secrets.PASSWORD }}"
@@ -103,9 +103,9 @@ jobs:
           echo "USERNAME=$USERNAME" >> $GITHUB_ENV
           echo "UPI_ID=$UPI_ID" >> $GITHUB_ENV
 
-      # -----------------------------
+      # ---------------------------------
       # Run Cypress Automation
-      # -----------------------------
+      # ---------------------------------
       - name: Run IRCTC Cypress Automation
         run: |
           xvfb-run npx cypress run \
@@ -114,9 +114,9 @@ jobs:
             --key ${{ secrets.CYPRESS_RECORD_KEY }} \
             --env UPI_ID=${{ env.UPI_ID }},USERNAME=${{ env.USERNAME }},PASSWORD=${{ env.PASSWORD }}
 
-      # -----------------------------
-      # Upload Screenshots on Failure
-      # -----------------------------
+      # ---------------------------------
+      # Upload Screenshots if Failed
+      # ---------------------------------
       - name: Upload Cypress Screenshots
         if: failure()
         uses: actions/upload-artifact@v4
@@ -124,9 +124,9 @@ jobs:
           name: cypress-screenshots
           path: cypress/screenshots
 
-      # -----------------------------
-      # Upload Videos
-      # -----------------------------
+      # ---------------------------------
+      # Upload Cypress Videos
+      # ---------------------------------
       - name: Upload Cypress Videos
         if: always()
         uses: actions/upload-artifact@v4
