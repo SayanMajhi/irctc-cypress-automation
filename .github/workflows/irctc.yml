@@ -1,63 +1,126 @@
 name: IRCTC Automation Booking
+
 on:
   push:
     branches:
-      - 'main'
+      - main
+
   pull_request:
+
   workflow_dispatch:
     inputs:
       USERNAME:
         required: true
         type: string
         description: "Your IRCTC Username"
+
       PASSWORD:
         required: true
         type: string
         description: "Your IRCTC Password"
+
       UPI_ID:
         required: true
         type: string
-        description: "Your UPI ID To Make Payment From"
+        description: "Your UPI ID"
+
 jobs:
   IRCTC-Booking:
     runs-on: ubuntu-22.04
 
+    timeout-minutes: 30
+
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-        cache: 'pip' # caching pip dependencies
-    - run: |
-        sudo timedatectl set-timezone Asia/Kolkata
-        pip install -r irctc-captcha-solver/requirements.txt
-        python3 irctc-captcha-solver/app-server.py "" # python3 irctc-captcha-solver/app-server.py "" is used for models to load before starting tatkal tickets 
-        PASSWORD=$(jq -r '.inputs.PASSWORD' $GITHUB_EVENT_PATH)
-        USERNAME=$(jq -r '.inputs.USERNAME' $GITHUB_EVENT_PATH)
-        UPI_ID=$(jq -r '.inputs.UPI_ID' $GITHUB_EVENT_PATH)
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-        echo ::add-mask::$PASSWORD
-        echo ::add-mask::$USERNAME
-        echo ::add-mask::$UPI_ID
+      # -------------------------
+      # Python Setup
+      # -------------------------
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
 
-        echo PASSWORD=$PASSWORD >> $GITHUB_ENV
-        echo USERNAME=$USERNAME >> $GITHUB_ENV
-        echo UPI_ID=$UPI_ID >> $GITHUB_ENV
+      - name: Install Python Dependencies
+        run: |
+          sudo timedatectl set-timezone Asia/Kolkata
 
+          python -m pip install --upgrade pip
 
-    # python3 irctc-captcha-solver/app.py "" is used for models to load before starting tatkal tickets 
+          pip install -r irctc-captcha-solver/requirements.txt
 
-    - name: Install Node.js and npm
-      uses: actions/setup-node@v4
-      with:
-        node-version: '20.12.2'
+      # -------------------------
+      # Node.js Setup
+      # -------------------------
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
 
-    - name: Installing Cypress & Running IRCTC Cypress Automation
-      run: |
-        npm install cypress
-        npx cypress run --browser chrome --headed --record --key a15b31a6-b9ee-4678-b9ac-f45a190851fe --env UPI_ID=${{ inputs.UPI_ID || '' }},USERNAME=${{ inputs.USERNAME || secrets.USERNAME }},PASSWORD=${{ inputs.PASSWORD || secrets.PASSWORD }}
+      - name: Install Node Dependencies
+        run: |
+          npm install
+          npm install -g wait-on
 
-    # - name: Running IRCTC Cypress Script
-    #   uses: cypress-io/github-action@v6
-    #   with:
-    #     command: npx cypress run --record --key a15b31a6-b9ee-4678-b9ac-f45a190851fe --env UPI_ID=${{ inputs.UPI_ID || '' }},USERNAME=${{ inputs.USERNAME || secrets.USERNAME }},PASSWORD=${{ inputs.PASSWORD || secrets.PASSWORD }}
+      # -------------------------
+      # Start Flask Captcha Server
+      # -------------------------
+      - name: Start Captcha Solver Server
+        run: |
+          python irctc-captcha-solver/app-server.py --host 0.0.0.0 --port 5000 &
+
+          echo "Waiting for Flask server..."
+
+          npx wait-on http://127.0.0.1:5000
+
+          echo "Flask server started successfully."
+
+      # -------------------------
+      # Mask Secrets
+      # -------------------------
+      - name: Prepare Environment Variables
+        run: |
+          PASSWORD="${{ inputs.PASSWORD || secrets.PASSWORD }}"
+          USERNAME="${{ inputs.USERNAME || secrets.USERNAME }}"
+          UPI_ID="${{ inputs.UPI_ID || secrets.UPI_ID }}"
+
+          echo "::add-mask::$PASSWORD"
+          echo "::add-mask::$USERNAME"
+          echo "::add-mask::$UPI_ID"
+
+          echo "PASSWORD=$PASSWORD" >> $GITHUB_ENV
+          echo "USERNAME=$USERNAME" >> $GITHUB_ENV
+          echo "UPI_ID=$UPI_ID" >> $GITHUB_ENV
+
+      # -------------------------
+      # Run Cypress Automation
+      # -------------------------
+      - name: Run IRCTC Cypress Automation
+        run: |
+          xvfb-run npx cypress run \
+            --browser chrome \
+            --record \
+            --key ${{ secrets.CYPRESS_RECORD_KEY }} \
+            --env UPI_ID=${{ env.UPI_ID }},USERNAME=${{ env.USERNAME }},PASSWORD=${{ env.PASSWORD }}
+
+      # -------------------------
+      # Upload Cypress Screenshots
+      # -------------------------
+      - name: Upload Cypress Screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cypress-screenshots
+          path: cypress/screenshots
+
+      # -------------------------
+      # Upload Cypress Videos
+      # -------------------------
+      - name: Upload Cypress Videos
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cypress-videos
+          path: cypress/videos
