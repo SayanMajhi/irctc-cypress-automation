@@ -4,130 +4,175 @@ on:
   push:
     branches:
       - main
-
   pull_request:
-
+    branches:
+      - main
   workflow_dispatch:
     inputs:
-      USERNAME:
+      username:
         description: "IRCTC Username"
         required: true
         type: string
-
-      PASSWORD:
+      password:
         description: "IRCTC Password"
         required: true
         type: string
-
-      UPI_ID:
+      upi_id:
         description: "UPI ID"
         required: true
         type: string
 
-jobs:
-  IRCTC-Booking:
-    runs-on: ubuntu-22.04
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "20"
+  OCR_SERVER_HOST: "127.0.0.1"
+  OCR_SERVER_PORT: "5000"
+  OCR_SERVER_TIMEOUT: 30
 
-    timeout-minutes: 30
+jobs:
+  irctc-booking:
+    name: IRCTC Booking Automation
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
 
     steps:
       # -----------------------------------
-      # Checkout Repository
+      # 1. Checkout Repository
       # -----------------------------------
       - name: Checkout Repository
         uses: actions/checkout@v4
 
       # -----------------------------------
-      # Setup Python
+      # 2. Set System Timezone
       # -----------------------------------
-      - name: Setup Python
+      - name: Set System Timezone
+        run: sudo timedatectl set-timezone Asia/Kolkata
+
+      # -----------------------------------
+      # 3. Setup Python
+      # -----------------------------------
+      - name: Setup Python ${{ env.PYTHON_VERSION }}
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: "pip"
 
       # -----------------------------------
-      # Install Python Dependencies
+      # 4. Install Python Dependencies
       # -----------------------------------
       - name: Install Python Dependencies
         run: |
-          sudo timedatectl set-timezone Asia/Kolkata
-
           python -m pip install --upgrade pip
-
           pip install -r irctc-captcha-solver/requirements.txt
 
       # -----------------------------------
-      # Setup Node.js
+      # 5. Setup Node.js
       # -----------------------------------
-      - name: Setup Node.js
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
 
       # -----------------------------------
-      # Install Node Dependencies
+      # 6. Install Node Dependencies
       # -----------------------------------
       - name: Install Node Dependencies
-        run: |
-          npm install
-          npm install -g wait-on
+        run: npm ci
 
       # -----------------------------------
-      # Start Flask OCR Server
+      # 7. Prepare Environment Variables
+      # -----------------------------------
+      - name: Prepare Environment Variables
+        env:
+          INPUT_USERNAME: ${{ inputs.username }}
+          INPUT_PASSWORD: ${{ inputs.password }}
+          INPUT_UPI_ID: ${{ inputs.upi_id }}
+          SECRET_USERNAME: ${{ secrets.USERNAME }}
+          SECRET_PASSWORD: ${{ secrets.PASSWORD }}
+          SECRET_UPI_ID: ${{ secrets.UPI_ID }}
+        run: |
+          # Use input values if provided (workflow_dispatch), otherwise fall back to secrets
+          USERNAME="${INPUT_USERNAME:-$SECRET_USERNAME}"
+          PASSWORD="${INPUT_PASSWORD:-$SECRET_PASSWORD}"
+          UPI_ID="${INPUT_UPI_ID:-$SECRET_UPI_ID}"
+
+          # Mask sensitive values in logs
+          echo "::add-mask::$USERNAME"
+          echo "::add-mask::$PASSWORD"
+          echo "::add-mask::$UPI_ID"
+
+          # Export to environment
+          echo "IRCTC_USERNAME=$USERNAME" >> $GITHUB_ENV
+          echo "IRCTC_PASSWORD=$PASSWORD" >> $GITHUB_ENV
+          echo "IRCTC_UPI_ID=$UPI_ID" >> $GITHUB_ENV
+
+      # -----------------------------------
+      # 8. Start OCR Server
       # -----------------------------------
       - name: Start OCR Server
         run: |
-          python3 irctc-captcha-solver/app-server.py --host 0.0.0.0 --port 5000 &
+          python irctc-captcha-solver/app-server.py \
+            --host ${{ env.OCR_SERVER_HOST }} \
+            --port ${{ env.OCR_SERVER_PORT }} &
 
-          echo "Waiting for OCR server..."
+          echo "Waiting for OCR server to be ready..."
+          timeout ${{ env.OCR_SERVER_TIMEOUT }} bash -c '
+            until curl -f http://${{ env.OCR_SERVER_HOST }}:${{ env.OCR_SERVER_PORT }} > /dev/null 2>&1; do
+              sleep 1
+            done
+          ' || (echo "OCR server failed to start" && exit 1)
 
-          npx wait-on http://127.0.0.1:5000
-
-          echo "OCR server started successfully."
-
-      # -----------------------------------
-      # Prepare Secrets / ENV
-      # -----------------------------------
-      - name: Prepare Environment Variables
-        run: |
-          PASSWORD="${{ inputs.PASSWORD || secrets.PASSWORD }}"
-          USERNAME="${{ inputs.USERNAME || secrets.USERNAME }}"
-          UPI_ID="${{ inputs.UPI_ID || secrets.UPI_ID }}"
-
-          echo "::add-mask::$PASSWORD"
-          echo "::add-mask::$USERNAME"
-          echo "::add-mask::$UPI_ID"
-
-          echo "PASSWORD=$PASSWORD" >> $GITHUB_ENV
-          echo "USERNAME=$USERNAME" >> $GITHUB_ENV
-          echo "UPI_ID=$UPI_ID" >> $GITHUB_ENV
+          echo "✓ OCR server is ready"
 
       # -----------------------------------
-      # Run Cypress Automation
+      # 9. Run Cypress Automation
       # -----------------------------------
-      - name: Run Cypress Automation
+      - name: Run Cypress Tests
         run: |
           xvfb-run npx cypress run \
             --browser chrome \
-            --env UPI_ID=${{ env.UPI_ID }},USERNAME=${{ env.USERNAME }},PASSWORD=${{ env.PASSWORD }}
+            --config-file cypress.config.js \
+            --env USERNAME=${{ env.IRCTC_USERNAME }},PASSWORD=${{ env.IRCTC_PASSWORD }},UPI_ID=${{ env.IRCTC_UPI_ID }}
 
       # -----------------------------------
-      # Upload Screenshots on Failure
+      # 10. Upload Artifacts on Failure
       # -----------------------------------
       - name: Upload Cypress Screenshots
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: cypress-screenshots
-          path: cypress/screenshots
+          path: cypress/screenshots/
+          retention-days: 7
 
-      # -----------------------------------
-      # Upload Cypress Videos
-      # -----------------------------------
       - name: Upload Cypress Videos
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: cypress-videos
-          path: cypress/videos
+          path: cypress/videos/
+          retention-days: 7
+
+      # -----------------------------------
+      # 11. Upload Test Results
+      # -----------------------------------
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cypress-test-results
+          path: |
+            cypress/results/
+            cypress/reports/
+          retention-days: 7
+
+      # -----------------------------------
+      # 12. Notify on Failure
+      # -----------------------------------
+      - name: Notify Failure
+        if: failure()
+        run: |
+          echo "❌ IRCTC Automation failed"
+          echo "Check artifacts for screenshots and videos"
+          exit 1
