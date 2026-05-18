@@ -112,28 +112,18 @@ jobs:
       # -----------------------------------
       - name: Start OCR Server
         run: |
-          python irctc-captcha-solver/app-server.py \
-            --host ${{ env.OCR_SERVER_HOST }} \
-            --port ${{ env.OCR_SERVER_PORT }} &
-
+          python irctc-captcha-solver/app-server.py --host 0.0.0.0 --port 5000 &
+          
           echo "Waiting for OCR server to be ready..."
-          timeout ${{ env.OCR_SERVER_TIMEOUT }} bash -c '
-            until curl -f http://${{ env.OCR_SERVER_HOST }}:${{ env.OCR_SERVER_PORT }} > /dev/null 2>&1; do
-              sleep 1
-            done
-          ' || (echo "OCR server failed to start" && exit 1)
-
+          timeout 30 bash -c 'until curl -f http://127.0.0.1:5000 > /dev/null 2>&1; do sleep 1; done' || exit 1
+          
           echo "✓ OCR server is ready"
 
       # -----------------------------------
       # 9. Run Cypress Automation
       # -----------------------------------
       - name: Run Cypress Tests
-        run: |
-          xvfb-run npx cypress run \
-            --browser chrome \
-            --config-file cypress.config.js \
-            --env USERNAME=${{ env.IRCTC_USERNAME }},PASSWORD=${{ env.IRCTC_PASSWORD }},UPI_ID=${{ env.IRCTC_UPI_ID }}
+        run: xvfb-run npx cypress run --browser chrome --env USERNAME=${{ env.IRCTC_USERNAME }},PASSWORD=${{ env.IRCTC_PASSWORD }},UPI_ID=${{ env.IRCTC_UPI_ID }}
 
       # -----------------------------------
       # 10. Upload Artifacts on Failure
